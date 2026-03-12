@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
-// ── Minimal in-memory DB (persists via window global across re-renders) ──
-if (!window.__SEO_DB) {
-  window.__SEO_DB = { users: {}, sessions: {} };
+// ── Audit history (persists via window global across re-renders) ──
+if (!window.__SEO_AUDITS) {
+  window.__SEO_AUDITS = {};
 }
-const DB = window.__SEO_DB;
+const AUDITS = window.__SEO_AUDITS;
 
 // ── Utility ──
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -13,25 +13,6 @@ const fmt = (iso) => {
   const d = new Date(iso);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
 };
-
-// ── Auth helpers ──
-function register(email, password) {
-  if (DB.users[email]) return { error: "Account already exists." };
-  const id = uid();
-  DB.users[email] = { id, email, password, sites: [], audits: {} };
-  return { ok: true };
-}
-function login(email, password) {
-  const u = DB.users[email];
-  if (!u || u.password !== password) return { error: "Invalid email or password." };
-  const token = uid();
-  DB.sessions[token] = email;
-  return { token };
-}
-function getUser(token) {
-  const email = DB.sessions[token];
-  return email ? DB.users[email] : null;
-}
 
 // ── SEO Audit via Claude API ──
 async function runAudit(url, apiKey) {
@@ -176,78 +157,6 @@ function ScoreBar({ score }) {
 
 // ── SCREENS ──
 
-function AuthScreen({ onAuth }) {
-  const [mode, setMode] = useState("login");
-  const [email, setEmail] = useState("");
-  const [pass, setPass] = useState("");
-  const [err, setErr] = useState("");
-
-  const submit = () => {
-    setErr("");
-    if (!email || !pass) return setErr("Please fill in all fields.");
-    if (mode === "register") {
-      const r = register(email, pass);
-      if (r.error) return setErr(r.error);
-      const { token } = login(email, pass);
-      onAuth(token);
-    } else {
-      const r = login(email, pass);
-      if (r.error) return setErr(r.error);
-      onAuth(r.token);
-    }
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#020817", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif", padding: 20 }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-      <div style={{ width: "100%", maxWidth: 420 }}>
-        {/* Logo */}
-        <div style={{ textAlign: "center", marginBottom: 40 }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 36, height: 36, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📊</div>
-            <span style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", fontFamily: "'DM Mono', monospace", letterSpacing: -1 }}>SiteScore</span>
-          </div>
-          <p style={{ color: "#64748b", fontSize: 14, margin: 0 }}>SEO audits that tell you what to fix, not just what's broken.</p>
-        </div>
-
-        <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 16, padding: 32 }}>
-          <div style={{ display: "flex", background: "#020817", borderRadius: 10, padding: 4, marginBottom: 28, gap: 4 }}>
-            {["login", "register"].map((m) => (
-              <button key={m} onClick={() => { setMode(m); setErr(""); }}
-                style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", transition: "all 0.2s",
-                  background: mode === m ? "#6366f1" : "transparent", color: mode === m ? "white" : "#64748b" }}>
-                {m === "login" ? "Sign In" : "Create Account"}
-              </button>
-            ))}
-          </div>
-
-          {["Email", "Password"].map((label, i) => (
-            <div key={label} style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#94a3b8", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</label>
-              <input type={i === 1 ? "password" : "email"} value={i === 0 ? email : pass}
-                onChange={(e) => i === 0 ? setEmail(e.target.value) : setPass(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && submit()}
-                placeholder={i === 0 ? "you@example.com" : "••••••••"}
-                style={{ width: "100%", padding: "12px 14px", background: "#020817", border: "1px solid #1e293b", borderRadius: 10, color: "#f1f5f9", fontSize: 14, fontFamily: "'DM Sans', sans-serif", outline: "none", boxSizing: "border-box" }} />
-            </div>
-          ))}
-
-          {err && <div style={{ background: "#1e0a0a", border: "1px solid #7f1d1d", borderRadius: 8, padding: "10px 14px", color: "#fca5a5", fontSize: 13, marginBottom: 16 }}>{err}</div>}
-
-          <button onClick={submit}
-            style={{ width: "100%", padding: "13px 0", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", border: "none", borderRadius: 10, color: "white", fontSize: 15, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: "pointer", marginTop: 4 }}>
-            {mode === "login" ? "Sign In →" : "Create Account →"}
-          </button>
-        </div>
-
-        <p style={{ textAlign: "center", color: "#1e293b", fontSize: 12, marginTop: 24 }}>
-          Demo: use any email + password to register, then sign in.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 function ApiKeyScreen({ onKey }) {
   const [key, setKey] = useState("");
   const [err, setErr] = useState("");
@@ -266,10 +175,10 @@ function ApiKeyScreen({ onKey }) {
       <div style={{ width: "100%", maxWidth: 420 }}>
         <div style={{ textAlign: "center", marginBottom: 40 }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 36, height: 36, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🔑</div>
+            <div style={{ width: 36, height: 36, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📊</div>
             <span style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", fontFamily: "'DM Mono', monospace", letterSpacing: -1 }}>SiteScore</span>
           </div>
-          <p style={{ color: "#64748b", fontSize: 14, margin: 0 }}>Enter your Anthropic API key to run audits.</p>
+          <p style={{ color: "#64748b", fontSize: 14, margin: 0 }}>SEO audits that tell you what to fix, not just what's broken.</p>
         </div>
         <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 16, padding: 32 }}>
           <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#94a3b8", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Anthropic API Key</label>
@@ -284,7 +193,7 @@ function ApiKeyScreen({ onKey }) {
           {err && <div style={{ background: "#1e0a0a", border: "1px solid #7f1d1d", borderRadius: 8, padding: "10px 14px", color: "#fca5a5", fontSize: 13, marginBottom: 16 }}>{err}</div>}
           <button onClick={submit}
             style={{ width: "100%", padding: "13px 0", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", border: "none", borderRadius: 10, color: "white", fontSize: 15, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: "pointer" }}>
-            Save Key →
+            Get Started →
           </button>
         </div>
         <p style={{ textAlign: "center", color: "#1e293b", fontSize: 12, marginTop: 24 }}>
@@ -295,26 +204,23 @@ function ApiKeyScreen({ onKey }) {
   );
 }
 
-function Dashboard({ token, onLogout, apiKey, onClearKey }) {
-  const [user, setUser] = useState(() => getUser(token));
-  const [url, setUrl] = useState(user?.sites?.[0] || "");
-  const [editingUrl, setEditingUrl] = useState(!user?.sites?.[0]);
+function Dashboard({ apiKey, onClearKey }) {
+  const [url, setUrl] = useState("");
+  const [editingUrl, setEditingUrl] = useState(true);
+  const [audits, setAudits] = useState([]);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState("");
   const [selectedAudit, setSelectedAudit] = useState(null);
   const [activeCategory, setActiveCategory] = useState(null);
   const [view, setView] = useState("dashboard"); // dashboard | report
 
-  const refreshUser = () => setUser({ ...DB.users[DB.sessions[token]] });
-
   const saveUrl = () => {
     let u = url.trim();
     if (!u) return;
     if (!u.startsWith("http")) u = "https://" + u;
-    DB.users[DB.sessions[token]].sites = [u];
     setUrl(u);
     setEditingUrl(false);
-    refreshUser();
+    setAudits(AUDITS[u] || []);
   };
 
   const doAudit = async () => {
@@ -327,12 +233,10 @@ function Dashboard({ token, onLogout, apiKey, onClearKey }) {
     try {
       const result = await runAudit(url, apiKey);
       clearInterval(ticker);
-      const auditId = uid();
-      const audit = { id: auditId, url, createdAt: now(), ...result };
-      const email = DB.sessions[token];
-      if (!DB.users[email].audits[url]) DB.users[email].audits[url] = [];
-      DB.users[email].audits[url].unshift(audit);
-      refreshUser();
+      const audit = { id: uid(), url, createdAt: now(), ...result };
+      if (!AUDITS[url]) AUDITS[url] = [];
+      AUDITS[url].unshift(audit);
+      setAudits([...AUDITS[url]]);
       setSelectedAudit(audit);
       setActiveCategory(audit.categories?.[0]?.name || null);
       setView("report");
@@ -343,8 +247,6 @@ function Dashboard({ token, onLogout, apiKey, onClearKey }) {
     setRunning(false);
     setProgress("");
   };
-
-  const audits = url && user?.audits?.[url] ? user.audits[url] : [];
 
   if (view === "report" && selectedAudit) {
     return <ReportView audit={selectedAudit} activeCategory={activeCategory} setActiveCategory={setActiveCategory} onBack={() => setView("dashboard")} />;
@@ -360,11 +262,7 @@ function Dashboard({ token, onLogout, apiKey, onClearKey }) {
           <div style={{ width: 28, height: 28, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📊</div>
           <span style={{ fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 18, letterSpacing: -0.5 }}>SiteScore</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ fontSize: 13, color: "#64748b" }}>{user?.email}</span>
-          <button onClick={onClearKey} style={{ fontSize: 13, color: "#64748b", background: "none", border: "1px solid #1e293b", padding: "6px 14px", borderRadius: 8, cursor: "pointer" }}>API Key</button>
-          <button onClick={onLogout} style={{ fontSize: 13, color: "#64748b", background: "none", border: "1px solid #1e293b", padding: "6px 14px", borderRadius: 8, cursor: "pointer" }}>Sign out</button>
-        </div>
+        <button onClick={onClearKey} style={{ fontSize: 13, color: "#64748b", background: "none", border: "1px solid #1e293b", padding: "6px 14px", borderRadius: 8, cursor: "pointer" }}>API Key</button>
       </nav>
 
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "40px 24px" }}>
@@ -606,23 +504,13 @@ function IssueCard({ issue }) {
 
 // ── App Root ──
 export default function App() {
-  const [token, setToken] = useState(() => sessionStorage.getItem("seo_token") || null);
   const [apiKey, setApiKey] = useState(() => sessionStorage.getItem("seo_api_key") || null);
 
-  const handleAuth = (t) => {
-    sessionStorage.setItem("seo_token", t);
-    setToken(t);
-  };
-  const handleLogout = () => {
-    sessionStorage.removeItem("seo_token");
-    setToken(null);
-  };
   const handleClearKey = () => {
     sessionStorage.removeItem("seo_api_key");
     setApiKey(null);
   };
 
-  if (!token || !getUser(token)) return <AuthScreen onAuth={handleAuth} />;
   if (!apiKey) return <ApiKeyScreen onKey={(k) => setApiKey(k)} />;
-  return <Dashboard token={token} onLogout={handleLogout} apiKey={apiKey} onClearKey={handleClearKey} />;
+  return <Dashboard apiKey={apiKey} onClearKey={handleClearKey} />;
 }
