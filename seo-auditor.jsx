@@ -34,7 +34,7 @@ function getUser(token) {
 }
 
 // ── SEO Audit via Claude API ──
-async function runAudit(url) {
+async function runAudit(url, apiKey) {
   const prompt = `You are an expert SEO auditor. Analyze the website at: ${url}
 
 Perform a comprehensive SEO audit and return ONLY a JSON object (no markdown, no explanation) with this exact structure:
@@ -96,17 +96,32 @@ Base the audit on what you know about the domain, common SEO patterns, and what 
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
+      model: "claude-sonnet-4-6",
+      max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     }),
   });
+  if (!res.ok) {
+    let errMsg = `API error ${res.status}`;
+    try { const e = await res.json(); if (e.error?.message) errMsg = e.error.message; } catch (_) {}
+    throw new Error(errMsg);
+  }
   const data = await res.json();
   const text = data.content?.map((b) => b.text || "").join("") || "";
-  const clean = text.replace(/```json|```/g, "").trim();
-  return JSON.parse(clean);
+  if (!text) throw new Error("Empty response from API. The model may have stopped early.");
+  const clean = text.replace(/```json[\s\S]*?```|```/g, "").trim();
+  try {
+    return JSON.parse(clean);
+  } catch (_) {
+    throw new Error("Could not parse audit response as JSON. Try running the audit again.");
+  }
 }
 
 // ── Color helpers ──
@@ -233,7 +248,54 @@ function AuthScreen({ onAuth }) {
   );
 }
 
-function Dashboard({ token, onLogout }) {
+function ApiKeyScreen({ onKey }) {
+  const [key, setKey] = useState("");
+  const [err, setErr] = useState("");
+
+  const submit = () => {
+    const trimmed = key.trim();
+    if (!trimmed) return setErr("Please enter your Anthropic API key.");
+    if (!trimmed.startsWith("sk-ant-")) return setErr("That doesn't look like a valid Anthropic API key (should start with sk-ant-).");
+    sessionStorage.setItem("seo_api_key", trimmed);
+    onKey(trimmed);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#020817", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif", padding: 20 }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+      <div style={{ width: "100%", maxWidth: 420 }}>
+        <div style={{ textAlign: "center", marginBottom: 40 }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+            <div style={{ width: 36, height: 36, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🔑</div>
+            <span style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", fontFamily: "'DM Mono', monospace", letterSpacing: -1 }}>SiteScore</span>
+          </div>
+          <p style={{ color: "#64748b", fontSize: 14, margin: 0 }}>Enter your Anthropic API key to run audits.</p>
+        </div>
+        <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 16, padding: 32 }}>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#94a3b8", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Anthropic API Key</label>
+          <input
+            type="password"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            placeholder="sk-ant-..."
+            style={{ width: "100%", padding: "12px 14px", background: "#020817", border: "1px solid #1e293b", borderRadius: 10, color: "#f1f5f9", fontSize: 14, fontFamily: "'DM Mono', monospace", outline: "none", boxSizing: "border-box", marginBottom: 16 }}
+          />
+          {err && <div style={{ background: "#1e0a0a", border: "1px solid #7f1d1d", borderRadius: 8, padding: "10px 14px", color: "#fca5a5", fontSize: 13, marginBottom: 16 }}>{err}</div>}
+          <button onClick={submit}
+            style={{ width: "100%", padding: "13px 0", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", border: "none", borderRadius: 10, color: "white", fontSize: 15, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: "pointer" }}>
+            Save Key →
+          </button>
+        </div>
+        <p style={{ textAlign: "center", color: "#1e293b", fontSize: 12, marginTop: 24 }}>
+          Your key is stored in sessionStorage only — never sent anywhere except Anthropic's API.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ token, onLogout, apiKey, onClearKey }) {
   const [user, setUser] = useState(() => getUser(token));
   const [url, setUrl] = useState(user?.sites?.[0] || "");
   const [editingUrl, setEditingUrl] = useState(!user?.sites?.[0]);
@@ -263,7 +325,7 @@ function Dashboard({ token, onLogout }) {
     let si = 0;
     const ticker = setInterval(() => { if (si < steps.length) setProgress(steps[si++]); }, 1200);
     try {
-      const result = await runAudit(url);
+      const result = await runAudit(url, apiKey);
       clearInterval(ticker);
       const auditId = uid();
       const audit = { id: auditId, url, createdAt: now(), ...result };
@@ -300,6 +362,7 @@ function Dashboard({ token, onLogout }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span style={{ fontSize: 13, color: "#64748b" }}>{user?.email}</span>
+          <button onClick={onClearKey} style={{ fontSize: 13, color: "#64748b", background: "none", border: "1px solid #1e293b", padding: "6px 14px", borderRadius: 8, cursor: "pointer" }}>API Key</button>
           <button onClick={onLogout} style={{ fontSize: 13, color: "#64748b", background: "none", border: "1px solid #1e293b", padding: "6px 14px", borderRadius: 8, cursor: "pointer" }}>Sign out</button>
         </div>
       </nav>
@@ -544,6 +607,7 @@ function IssueCard({ issue }) {
 // ── App Root ──
 export default function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem("seo_token") || null);
+  const [apiKey, setApiKey] = useState(() => sessionStorage.getItem("seo_api_key") || null);
 
   const handleAuth = (t) => {
     sessionStorage.setItem("seo_token", t);
@@ -553,7 +617,12 @@ export default function App() {
     sessionStorage.removeItem("seo_token");
     setToken(null);
   };
+  const handleClearKey = () => {
+    sessionStorage.removeItem("seo_api_key");
+    setApiKey(null);
+  };
 
   if (!token || !getUser(token)) return <AuthScreen onAuth={handleAuth} />;
-  return <Dashboard token={token} onLogout={handleLogout} />;
+  if (!apiKey) return <ApiKeyScreen onKey={(k) => setApiKey(k)} />;
+  return <Dashboard token={token} onLogout={handleLogout} apiKey={apiKey} onClearKey={handleClearKey} />;
 }
